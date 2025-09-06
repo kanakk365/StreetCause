@@ -47,7 +47,7 @@ type RazorpayOptions = {
 
 type RazorpayInstance = {
   open: () => void;
-  on: (event: "payment.failed", handler: (err: RazorpayPaymentFailed) => void) => void;
+  on: (event: "payment.failed" | "modal.dismiss", handler: (err?: RazorpayPaymentFailed | undefined) => void) => void;
 };
 
 type DonationModalProps = {
@@ -76,6 +76,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
   const [paymentMode, setPaymentMode] = useState("Payment Mode");
   const [touched, setTouched] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<"idle" | "processing" | "success" | "failed">("idle");
   const [ticketData, setTicketData] = useState<TicketData | null>(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
 
@@ -95,11 +96,16 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
 
   useEffect(() => {
     if (!isOpen) {
-      // Reset states when modal closes
-      setTicketData(null);
-      setShowTicketModal(false);
+      // Clear form when modal closes
+      clearForm();
       return;
     }
+    // Reset payment status when modal opens
+    setPaymentStatus("idle");
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -120,6 +126,32 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
 
 
   const amountNumber = useMemo(() => Number(amount || 0), [amount]);
+
+  // Function to clear all form fields
+  const clearForm = () => {
+    setName("");
+    setMobile("");
+    setEmail("");
+    setAmount("");
+    setMemberId("");
+    setMemberType("Member Type");
+    setPaymentMode("Payment Mode");
+    setTouched(false);
+    setIsLoading(false);
+    setPaymentStatus("idle");
+    setTicketData(null);
+    setShowTicketModal(false);
+    setErrors({
+      name: "",
+      mobile: "",
+      email: "",
+      memberId: "",
+      memberType: "",
+      amount: "",
+      idType: "",
+      paymentMode: ""
+    });
+  };
 
   // Validate individual fields
   const validateField = (fieldName: string, value: string) => {
@@ -190,6 +222,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
     if (!isValid) return;
 
     setIsLoading(true);
+    setPaymentStatus("processing");
     try {
       // Step 1: Create donation record on backend
       const donationData = {
@@ -254,6 +287,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
             // Payment successful, show ticket
             console.log("Razorpay success:", resp);
             console.log("Donation data:", donation);
+            setPaymentStatus("success");
 
             const formattedTicketData: TicketData = {
               passPurchaseName: donation.name,
@@ -271,22 +305,61 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
             // Show success message
             toast.success(`Payment successful! ₹${amountNumber} donation received. Here is your receipt.`);
 
+            setIsLoading(false);
             setTicketData(formattedTicketData);
             setShowTicketModal(true);
             console.log("Ticket modal should now be visible");
           },
         };
 
-        const rzp: RazorpayInstance = new window.Razorpay(options);
-        rzp.on("payment.failed", function (err: RazorpayPaymentFailed) {
+        const rzp = new window.Razorpay(options);
+        rzp.on("payment.failed", function (err?: RazorpayPaymentFailed) {
           console.error("Razorpay failure:", err);
+          setPaymentStatus("failed");
           toast.error("Payment failed. Please try again.");
           setIsLoading(false);
         });
+
+        // Handle payment modal dismiss (user cancelled)
+        rzp.on("modal.dismiss", () => {
+          setPaymentStatus("failed");
+          toast.error("Payment cancelled.");
+          setIsLoading(false);
+        });
+
         rzp.open();
 
-        // Handle modal dismiss (user closed without paying)
-        rzp.on("payment.failed", () => {
+        // Fallback: Reset processing state after 2 minutes if no handler triggered
+        const fallbackTimeout = setTimeout(() => {
+          if (isLoading) {
+            setIsLoading(false);
+            setPaymentStatus("failed");
+            toast.error("Payment process timed out. Please try again.");
+          }
+        }, 120000); // 2 minutes
+
+        // Clear fallback timeout when payment is handled
+        const clearFallback = () => clearTimeout(fallbackTimeout);
+
+        // Attach cleanup to all handlers
+        const originalSuccess = options.handler;
+        options.handler = (resp) => {
+          clearFallback();
+          originalSuccess(resp);
+        };
+
+        rzp.on("payment.failed", function (err?: RazorpayPaymentFailed) {
+          clearFallback();
+          console.error("Razorpay failure:", err);
+          setPaymentStatus("failed");
+          toast.error("Payment failed. Please try again.");
+          setIsLoading(false);
+        });
+
+        rzp.on("modal.dismiss", () => {
+          clearFallback();
+          setPaymentStatus("failed");
+          toast.error("Payment cancelled.");
           setIsLoading(false);
         });
 
@@ -295,6 +368,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
       }
     } catch (error) {
       console.error('Donation submission failed:', error);
+      setPaymentStatus("failed");
       toast.error('Failed to submit donation. Please try again.');
       setIsLoading(false);
     }
@@ -427,7 +501,10 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
               disabled={isLoading}
               className="w-full sm:min-w-[11.25rem] rounded-xl px-6 py-3 text-white font-medium bg-[#FF7A00] hover:bg-[#e66a00] transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? "Processing..." : "Submit"}
+              {paymentStatus === "processing" ? "Processing Payment..." :
+               paymentStatus === "success" ? "Payment Successful!" :
+               paymentStatus === "failed" ? "Payment Failed" :
+               isLoading ? "Preparing Payment..." : "Submit"}
             </button>
           </div>
         </form>
@@ -437,6 +514,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
           onClick={() => {
             // Close both donation modal and QR modal if open
             setShowTicketModal(false);
+            clearForm();
             onClose();
           }}
           className="absolute right-3 top-3 text-white/90 hover:text-white text-xl"

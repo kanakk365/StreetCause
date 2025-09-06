@@ -46,7 +46,7 @@ type RazorpayOptions = {
 
 type RazorpayInstance = {
   open: () => void;
-  on: (event: "payment.failed", handler: (err: RazorpayPaymentFailed) => void) => void;
+  on: (event: "payment.failed" | "modal.dismiss", handler: (err?: RazorpayPaymentFailed | undefined) => void) => void;
 };
 
 type BuyPassModalProps = {
@@ -80,6 +80,7 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
   const [paymentMode, setPaymentMode] = useState("Payment Mode");
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<"idle" | "processing" | "success" | "failed">("idle");
 
   // Field error states
   const [errors, setErrors] = useState({
@@ -98,6 +99,15 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
       setPassType(initialPassType);
     }
   }, [initialPassType, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setPaymentStatus("idle");
+    } else {
+      // Clear form when modal closes
+      clearForm();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -120,6 +130,31 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
   }, [isOpen]);
 
   const passCount = useMemo(() => Number(passPurchase || 0), [passPurchase]);
+
+  // Function to clear all form fields
+  const clearForm = () => {
+    setName("");
+    setMobile("");
+    setEmail("");
+    setMemberId("");
+    setPassPurchase("");
+    setPassType("Pass Type");
+    setMemberType("Member Type");
+    setPaymentMode("Payment Mode");
+    setTouched(false);
+    setSubmitting(false);
+    setPaymentStatus("idle");
+    setErrors({
+      name: "",
+      mobile: "",
+      email: "",
+      memberId: "",
+      passPurchase: "",
+      passType: "",
+      memberType: "",
+      paymentMode: ""
+    });
+  };
 
   // Validate individual fields
   const validateField = (fieldName: string, value: string) => {
@@ -206,6 +241,7 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
 
     try {
       setSubmitting(true);
+      setPaymentStatus("processing");
       const normalizedPassType = /vip/i.test(passType) ? "VIP" : "Normal";
       const payload = {
         passPurchaseName: name.trim(),
@@ -270,22 +306,71 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
           handler: async (resp: RazorpayPaymentSuccess) => {
             // Optionally send to verify endpoint here
             console.log("Razorpay success:", resp);
+            setPaymentStatus("success");
+            setSubmitting(false);
+            toast.success("Payment successful! Your pass has been booked.");
             onSuccess?.(ticket);
             onClose();
           },
         };
 
-        const rzp: RazorpayInstance = new window.Razorpay(options);
-        rzp.on("payment.failed", function (err: RazorpayPaymentFailed) {
+        const rzp = new window.Razorpay(options);
+        rzp.on("payment.failed", function (err?: RazorpayPaymentFailed) {
           console.error("Razorpay failure:", err);
+          setPaymentStatus("failed");
+          setSubmitting(false);
           toast.error("Payment failed. Please try again.");
         });
+
+        // Handle payment modal dismiss (user cancelled)
+        rzp.on("modal.dismiss", () => {
+          setPaymentStatus("failed");
+          setSubmitting(false);
+          toast.error("Payment cancelled.");
+        });
+
         rzp.open();
+
+        // Fallback: Reset processing state after 2 minutes if no handler triggered
+        const fallbackTimeout = setTimeout(() => {
+          if (submitting) {
+            setSubmitting(false);
+            setPaymentStatus("failed");
+            toast.error("Payment process timed out. Please try again.");
+          }
+        }, 120000); // 2 minutes
+
+        // Clear fallback timeout when payment is handled
+        const clearFallback = () => clearTimeout(fallbackTimeout);
+
+        // Attach cleanup to all handlers
+        const originalSuccess = options.handler;
+        options.handler = (resp) => {
+          clearFallback();
+          originalSuccess(resp);
+        };
+
+        rzp.on("payment.failed", function (err?: RazorpayPaymentFailed) {
+          clearFallback();
+          console.error("Razorpay failure:", err);
+          setPaymentStatus("failed");
+          setSubmitting(false);
+          toast.error("Payment failed. Please try again.");
+        });
+
+        rzp.on("modal.dismiss", () => {
+          clearFallback();
+          setPaymentStatus("failed");
+          setSubmitting(false);
+          toast.error("Payment cancelled.");
+        });
+
       } else {
         toast.error(json?.message || "Failed to create ticket");
       }
     } catch (err) {
       console.error(err);
+      setPaymentStatus("failed");
       toast.error("Network error while creating ticket");
     } finally {
       setSubmitting(false);
@@ -427,9 +512,13 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
           <div className="sm:col-span-2 flex justify-center mt-2">
             <button
               type="submit"
-              className="w-full sm:min-w-[11.25rem] rounded-xl px-6 py-3 text-white font-medium bg-[#FF7A00] hover:bg-[#e66a00] transition"
+              disabled={submitting}
+              className="w-full sm:min-w-[11.25rem] rounded-xl px-6 py-3 text-white font-medium bg-[#FF7A00] hover:bg-[#e66a00] transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {paymentStatus === "processing" ? "Processing Payment..." :
+               paymentStatus === "success" ? "Payment Successful!" :
+               paymentStatus === "failed" ? "Payment Failed" :
+               submitting ? "Preparing Payment..." : "Submit"}
             </button>
           </div>
         </form>
