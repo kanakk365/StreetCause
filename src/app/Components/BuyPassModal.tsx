@@ -239,6 +239,15 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
 
     if (!isValid || submitting) return;
 
+    // Add timeout to prevent indefinite loading
+    const timeoutId = setTimeout(() => {
+      if (submitting) {
+        setSubmitting(false);
+        setPaymentStatus("failed");
+        toast.error("Request timed out. Please try again.");
+      }
+    }, 30000); // 30 seconds timeout
+
     try {
       setSubmitting(true);
       setPaymentStatus("processing");
@@ -263,24 +272,37 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
       });
 
       const json = await res.json();
+
+      // Handle API errors (non-2xx status codes)
+      if (!res.ok) {
+        throw new Error(json?.message || `HTTP ${res.status}: ${res.statusText}`);
+      }
       if (json?.success && json?.data) {
         const ticket = json.data;
 
         // Step 2: Create Razorpay order via checkout endpoint
         const amountRupees = /vip/i.test(ticket.passType) ? 999 : 309;
+        // Send rupees to backend, let backend handle paise conversion
+        const totalAmount = amountRupees * passCount;
         const cRes = await fetch("https://scpapi.elitceler.com/api/v1/payments/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: ticket.passPurchaseName,
-            amount: amountRupees,
+            amount: totalAmount,
             meta: { passId: ticket.passId, ticketId: ticket.id }
           })
         });
 
         if (!cRes.ok) throw new Error("Failed to create order");
         const cJson = await cRes.json();
-        const { orderId, amount, currency, keyId } = cJson;
+
+        // Extract order details from the nested response structure
+        const order = cJson.order || cJson.paymentUrl;
+        const orderId = order?.id;
+        const amount = order?.amount;
+        const currency = order?.currency || "INR";
+        const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
         // Step 3: Open Razorpay Checkout
         // Ensure checkout.js is loaded on page elsewhere (layout or component)
@@ -324,6 +346,7 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
 
         // Handle payment modal dismiss (user cancelled)
         rzp.on("modal.dismiss", () => {
+          console.log("Razorpay modal dismissed by user");
           setPaymentStatus("failed");
           setSubmitting(false);
           toast.error("Payment cancelled.");
@@ -331,14 +354,15 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
 
         rzp.open();
 
-        // Fallback: Reset processing state after 2 minutes if no handler triggered
+        // Fallback: Reset processing state after 30 seconds if no handler triggered
         const fallbackTimeout = setTimeout(() => {
           if (submitting) {
+            console.log("Fallback timeout triggered - resetting loading state");
             setSubmitting(false);
             setPaymentStatus("failed");
             toast.error("Payment process timed out. Please try again.");
           }
-        }, 120000); // 2 minutes
+        }, 30000); // 30 seconds
 
         // Clear fallback timeout when payment is handled
         const clearFallback = () => clearTimeout(fallbackTimeout);
@@ -367,13 +391,19 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
 
       } else {
         toast.error(json?.message || "Failed to create ticket");
+        setSubmitting(false);
+        setPaymentStatus("failed");
       }
     } catch (err) {
       console.error(err);
       setPaymentStatus("failed");
-      toast.error("Network error while creating ticket");
+      toast.error(err instanceof Error ? err.message : "Network error while creating ticket");
     } finally {
       setSubmitting(false);
+      // Clear timeout if it exists
+      if (typeof timeoutId !== 'undefined') {
+        clearTimeout(timeoutId);
+      }
     }
   };
 

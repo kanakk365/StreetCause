@@ -221,6 +221,15 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
 
     if (!isValid) return;
 
+    // Add timeout to prevent indefinite loading
+    const timeoutId = setTimeout(() => {
+      if (isLoading) {
+        setIsLoading(false);
+        setPaymentStatus("failed");
+        toast.error("Request timed out. Please try again.");
+      }
+    }, 30000); // 30 seconds timeout
+
     setIsLoading(true);
     setPaymentStatus("processing");
     try {
@@ -245,10 +254,16 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
 
       const result = await response.json();
 
+      // Handle API errors (non-2xx status codes)
+      if (!response.ok) {
+        throw new Error(result?.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
       if (result.success && result.data) {
         const donation = result.data;
 
         // Step 2: Create Razorpay order via checkout endpoint
+        // Send rupees to backend, let backend handle paise conversion
         const cRes = await fetch("https://scpapi.elitceler.com/api/v1/payments/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -261,7 +276,13 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
 
         if (!cRes.ok) throw new Error("Failed to create order");
         const cJson = await cRes.json();
-        const { orderId, amount, currency, keyId } = cJson;
+
+        // Extract order details from the nested response structure
+        const order = cJson.order || cJson.paymentUrl;
+        const orderId = order?.id;
+        const amount = order?.amount;
+        const currency = order?.currency || "INR";
+        const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
         // Step 3: Open Razorpay Checkout
         const options: RazorpayOptions = {
@@ -322,21 +343,23 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
 
         // Handle payment modal dismiss (user cancelled)
         rzp.on("modal.dismiss", () => {
+          console.log("Razorpay modal dismissed by user");
           setPaymentStatus("failed");
-          toast.error("Payment cancelled.");
           setIsLoading(false);
+          toast.error("Payment cancelled.");
         });
 
         rzp.open();
 
-        // Fallback: Reset processing state after 2 minutes if no handler triggered
+        // Fallback: Reset processing state after 30 seconds if no handler triggered
         const fallbackTimeout = setTimeout(() => {
           if (isLoading) {
+            console.log("Fallback timeout triggered - resetting loading state");
             setIsLoading(false);
             setPaymentStatus("failed");
             toast.error("Payment process timed out. Please try again.");
           }
-        }, 120000); // 2 minutes
+        }, 30000); // 30 seconds
 
         // Clear fallback timeout when payment is handled
         const clearFallback = () => clearTimeout(fallbackTimeout);
@@ -365,12 +388,19 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
 
       } else {
         toast.error('Failed to create donation. Please try again.');
+        setIsLoading(false);
+        setPaymentStatus("failed");
       }
     } catch (error) {
       console.error('Donation submission failed:', error);
       setPaymentStatus("failed");
-      toast.error('Failed to submit donation. Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Failed to submit donation. Please try again.');
+    } finally {
       setIsLoading(false);
+      // Clear timeout if it exists
+      if (typeof timeoutId !== 'undefined') {
+        clearTimeout(timeoutId);
+      }
     }
   };
 
