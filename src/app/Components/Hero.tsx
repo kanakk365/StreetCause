@@ -56,7 +56,7 @@ export const HeroSection: React.FC = () => {
       <div className="flex flex-col items-center justify-center gap-6 absolute inset-0 w-full h-full max-md:px-5 max-md:py-8 max-sm:px-4 max-sm:py-6 max-sm:gap-4">
         <header className="flex flex-col justify-center items-center gap-4 w-full">
           <h1 className="text-white text-5xl font-bold leading-[3.3125rem] tracking-[0.03125rem] text-center max-md:text-4xl max-md:leading-[2.75rem] max-sm:text-3xl max-sm:leading-[2.25rem] max-sm:px-4">
-            NAVRATRI MAHOTSAV
+            NAVRATRI NIRVANA
           </h1>
           <p className="text-white text-2xl font-normal leading-[3.3125rem] tracking-[0.03125rem] text-center max-md:text-xl max-md:leading-8 max-sm:text-xl max-sm:leading-7 max-sm:px-4 max-sm:max-w-[90%]">
             An evening of music, dance & celebration for a cause.
