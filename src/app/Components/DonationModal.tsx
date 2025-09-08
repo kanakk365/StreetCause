@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import TicketModal from "./TicketModal";
+import RefreshReminderPopup from "./RefreshReminderPopup";
 
 // Razorpay types
 declare global {
@@ -79,6 +80,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
   const [paymentStatus, setPaymentStatus] = useState<"idle" | "processing" | "success" | "failed">("idle");
   const [ticketData, setTicketData] = useState<TicketData | null>(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
+  const [showReminderPopup, setShowReminderPopup] = useState(false);
 
   // Field error states
   const [errors, setErrors] = useState({
@@ -98,10 +100,12 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
     if (!isOpen) {
       // Clear form when modal closes
       clearForm();
+      setShowReminderPopup(false); // Hide popup when modal closes
       return;
     }
     // Reset payment status when modal opens
     setPaymentStatus("idle");
+    setShowReminderPopup(true); // Show popup when modal opens
   }, [isOpen]);
 
   useEffect(() => {
@@ -141,6 +145,7 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
     setPaymentStatus("idle");
     setTicketData(null);
     setShowTicketModal(false);
+    setShowReminderPopup(false);
     setErrors({
       name: "",
       mobile: "",
@@ -151,6 +156,11 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
       idType: "",
       paymentMode: ""
     });
+  };
+
+  // Handle popup dismissal
+  const handlePopupDismiss = () => {
+    setShowReminderPopup(false);
   };
 
   // Validate individual fields
@@ -407,9 +417,17 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center">
-      <div className="absolute  inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-[95vw] max-w-[700px] max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-8 md:p-10 mx-4 bg-[#800020]">
+    <>
+      {/* Refresh Reminder Popup */}
+      <RefreshReminderPopup
+        isOpen={showReminderPopup}
+        onClose={handlePopupDismiss}
+      />
+
+      {/* Main Modal */}
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+        <div className="absolute  inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative w-[95vw] max-w-[700px] max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-8 md:p-10 mx-4 bg-[#800020]">
         <header className="flex flex-col items-center gap-2 mb-6 sm:mb-10">
           <h2 className="text-white text-2xl sm:text-3xl font-semibold text-center">Make a Donation</h2>
           <p className="text-white/90 text-sm sm:text-base text-center">Every rupee counts towards transforming lives.</p>
@@ -539,29 +557,30 @@ export const DonationModal: React.FC<DonationModalProps> = ({ isOpen, onClose })
           </div>
         </form>
 
-        <button
-          aria-label="Close"
-          onClick={() => {
-            // Close both donation modal and QR modal if open
-            setShowTicketModal(false);
-            clearForm();
-            onClose();
-          }}
-          className="absolute right-3 top-3 text-white/90 hover:text-white text-xl"
-        >
-          ×
-        </button>
-      </div>
+          <button
+            aria-label="Close"
+            onClick={() => {
+              // Close both donation modal and QR modal if open
+              setShowTicketModal(false);
+              clearForm();
+              onClose();
+            }}
+            className="absolute right-3 top-3 text-white/90 hover:text-white text-xl"
+          >
+            ×
+          </button>
+        </div>
 
-      {/* Ticket Modal for successful donation - shows alongside donation modal */}
-      {ticketData && showTicketModal && (
-        <TicketModal
-          isOpen={showTicketModal}
-          onClose={() => setShowTicketModal(false)}
-          data={ticketData}
-        />
-      )}
-    </div>
+        {/* Ticket Modal for successful donation - shows alongside donation modal */}
+        {ticketData && showTicketModal && (
+          <TicketModal
+            isOpen={showTicketModal}
+            onClose={() => setShowTicketModal(false)}
+            data={ticketData}
+          />
+        )}
+      </div>
+    </>
   );
 };
 

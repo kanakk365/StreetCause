@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import RefreshReminderPopup from "./RefreshReminderPopup";
 
 // Minimal Razorpay typings for Checkout.js
 declare global {
@@ -81,6 +82,7 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<"idle" | "processing" | "success" | "failed">("idle");
+  const [showReminderPopup, setShowReminderPopup] = useState(false);
 
   // Field error states
   const [errors, setErrors] = useState({
@@ -103,9 +105,11 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
   useEffect(() => {
     if (isOpen) {
       setPaymentStatus("idle");
+      setShowReminderPopup(true); // Show popup when modal opens
     } else {
       // Clear form when modal closes
       clearForm();
+      setShowReminderPopup(false); // Hide popup when modal closes
     }
   }, [isOpen]);
 
@@ -144,6 +148,7 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
     setTouched(false);
     setSubmitting(false);
     setPaymentStatus("idle");
+    setShowReminderPopup(false);
     setErrors({
       name: "",
       mobile: "",
@@ -154,6 +159,11 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
       memberType: "",
       paymentMode: ""
     });
+  };
+
+  // Handle popup dismissal
+  const handlePopupDismiss = () => {
+    setShowReminderPopup(false);
   };
 
   // Validate individual fields
@@ -410,9 +420,17 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center">
-      <div className="absolute  inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-[95vw] max-w-[700px] max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-8 md:p-10 mx-4 bg-[#800020]">
+    <>
+      {/* Refresh Reminder Popup */}
+      <RefreshReminderPopup
+        isOpen={showReminderPopup}
+        onClose={handlePopupDismiss}
+      />
+
+      {/* Main Modal */}
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+        <div className="absolute  inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative w-[95vw] max-w-[700px] max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-8 md:p-10 mx-4 bg-[#800020]">
         <header className="flex flex-col items-center gap-2 mb-6 sm:mb-10">
           <h2 className="text-white text-2xl sm:text-3xl font-semibold text-center">Get Your Pass</h2>
           <p className="text-white/90 text-sm sm:text-base text-center">Fill in the details to secure your entry.</p>
@@ -553,15 +571,16 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
           </div>
         </form>
 
-        <button
-          aria-label="Close"
-          onClick={onClose}
-          className="absolute right-3 top-3 text-white/90 hover:text-white text-xl"
-        >
-          ×
-        </button>
+          <button
+            aria-label="Close"
+            onClick={onClose}
+            className="absolute right-3 top-3 text-white/90 hover:text-white text-xl"
+          >
+            ×
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
