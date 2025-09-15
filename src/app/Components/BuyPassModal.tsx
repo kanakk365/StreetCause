@@ -43,6 +43,7 @@ type RazorpayOptions = {
   notes?: Record<string, string>;
   theme?: { color?: string };
   handler: (response: RazorpayPaymentSuccess) => void;
+  modal?: { ondismiss?: () => void };
 };
 
 type RazorpayInstance = {
@@ -262,7 +263,31 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
       setSubmitting(true);
       setPaymentStatus("processing");
       const normalizedPassType = /vip/i.test(passType) ? "VIP" : "Normal";
-      const payload = {
+
+      // Step 1: Create Razorpay order via checkout endpoint (send rupees)
+      const amountRupees = /vip/i.test(passType) ? 999 : 309;
+      const totalAmountRupees = amountRupees * passCount;
+      const cRes = await fetch("https://scpapi.elitceler.com/api/v1/payments/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          amount: totalAmountRupees,
+          meta: { context: "ticket" }
+        })
+      });
+      if (!cRes.ok) throw new Error("Failed to create order");
+      const cJson = await cRes.json();
+      const order = cJson.order || cJson.paymentUrl;
+      const orderId = order?.id;
+      const amount = order?.amount; // in paise for Razorpay checkout
+      const currency = order?.currency || "INR";
+      const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+
+      if (!orderId) throw new Error("Order ID not received");
+
+      // Step 2: Create ticket on backend with razorpayOrderId and amount in paise
+      const ticketPayload = {
         passPurchaseName: name.trim(),
         mobileNumber: mobile.trim(),
         email: email.trim(),
@@ -270,52 +295,28 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
         memberId: memberId.trim(),
         memberType: memberType.trim(),
         paymentMode: paymentMode.trim(),
+        amount: totalAmountRupees * 100,
+        razorpayOrderId: orderId
       };
 
-      // Step 1: Create ticket on backend
       const res = await fetch("https://scpapi.elitceler.com/api/v1/d1/tickets", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(ticketPayload),
       });
 
       const json = await res.json();
 
-      // Handle API errors (non-2xx status codes)
       if (!res.ok) {
         throw new Error(json?.message || `HTTP ${res.status}: ${res.statusText}`);
       }
+
       if (json?.success && json?.data) {
         const ticket = json.data;
 
-        // Step 2: Create Razorpay order via checkout endpoint
-        const amountRupees = /vip/i.test(ticket.passType) ? 999 : 309;
-        // Send rupees to backend, let backend handle paise conversion
-        const totalAmount = amountRupees * passCount;
-        const cRes = await fetch("https://scpapi.elitceler.com/api/v1/payments/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: ticket.passPurchaseName,
-            amount: totalAmount,
-            meta: { passId: ticket.passId, ticketId: ticket.id }
-          })
-        });
-
-        if (!cRes.ok) throw new Error("Failed to create order");
-        const cJson = await cRes.json();
-
-        // Extract order details from the nested response structure
-        const order = cJson.order || cJson.paymentUrl;
-        const orderId = order?.id;
-        const amount = order?.amount;
-        const currency = order?.currency || "INR";
-        const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
-
         // Step 3: Open Razorpay Checkout
-        // Ensure checkout.js is loaded on page elsewhere (layout or component)
         const options: RazorpayOptions = {
           key: keyId ?? (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID as string),
           amount,
@@ -331,40 +332,103 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
           notes: {
             passId: ticket.passId ?? "",
             ticketId: String(ticket?.id ?? ""),
-            memberId: payload.memberId,
-            memberType: payload.memberType,
+            memberId: ticketPayload.memberId,
+            memberType: ticketPayload.memberType,
           },
           theme: { color: "#800020" },
-          handler: async (resp: RazorpayPaymentSuccess) => {
-            // Optionally send to verify endpoint here
-            console.log("Razorpay success:", resp);
-            setPaymentStatus("success");
-            setSubmitting(false);
-            toast.success("Payment successful! Your pass has been booked.");
-            onSuccess?.(ticket);
-            onClose();
+          handler: async (response: RazorpayPaymentSuccess) => {
+            try {
+              // Step 4: Verify payment with backend
+              const verifyResponse = await fetch(
+                "https://scpapi.elitceler.com/api/v1/payments/verification",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_signature: response.razorpay_signature,
+                  }),
+                }
+              );
+
+              if (!verifyResponse.ok) {
+                throw new Error("Verification failed");
+              }
+
+              const verifyData = await verifyResponse.json();
+              if (verifyData.success) {
+                setPaymentStatus("success");
+                setSubmitting(false);
+                toast.success("Payment successful! Your pass has been booked.");
+                onSuccess?.(ticket);
+                onClose();
+              } else {
+                throw new Error(verifyData.message || "Verification failed");
+              }
+            } catch (e) {
+              console.error(e);
+              setPaymentStatus("failed");
+              setSubmitting(false);
+              toast.error("Payment verification failed. Please contact support with your order ID.");
+            }
           },
+          modal: {
+            ondismiss: async () => {
+              // Poll verification briefly in case payment completed right before close
+              const attempts = 5;
+              const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+              let verified = false;
+              for (let i = 0; i < attempts; i++) {
+                try {
+                  const resp = await fetch("https://scpapi.elitceler.com/api/v1/payments/verification", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ razorpay_order_id: orderId }),
+                  });
+                  if (resp.ok) {
+                    verified = true;
+                    break;
+                  }
+                } catch {}
+                await wait(2000);
+              }
+              if (verified) {
+                setPaymentStatus("success");
+                setSubmitting(false);
+                toast.success("Payment successful! Your pass has been booked.");
+                onSuccess?.(ticket);
+                onClose();
+              } else {
+                setPaymentStatus("failed");
+                setSubmitting(false);
+                toast.error("Payment cancelled.");
+              }
+            }
+          }
         };
 
         const rzp = new window.Razorpay(options);
-        rzp.on("payment.failed", function (err?: RazorpayPaymentFailed) {
+        rzp.on("payment.failed", async function (err?: RazorpayPaymentFailed) {
           console.error("Razorpay failure:", err);
+          try {
+            await fetch("https://scpapi.elitceler.com/api/v1/payments/verification", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ razorpay_order_id: orderId }),
+            });
+          } catch (e) {
+            console.error("Verification call on failure errored:", e);
+          }
           setPaymentStatus("failed");
           setSubmitting(false);
           toast.error("Payment failed. Please try again.");
         });
 
-        // Handle payment modal dismiss (user cancelled)
-        rzp.on("modal.dismiss", () => {
-          console.log("Razorpay modal dismissed by user");
-          setPaymentStatus("failed");
-          setSubmitting(false);
-          toast.error("Payment cancelled.");
-        });
+        // Remove old event-based modal.dismiss; handled via options.modal.ondismiss
 
         rzp.open();
 
-        // Fallback: Reset processing state after 30 seconds if no handler triggered
         const fallbackTimeout = setTimeout(() => {
           if (submitting) {
             console.log("Fallback timeout triggered - resetting loading state");
@@ -372,33 +436,34 @@ export const BuyPassModal: React.FC<BuyPassModalProps> = ({ isOpen, onClose, ini
             setPaymentStatus("failed");
             toast.error("Payment process timed out. Please try again.");
           }
-        }, 30000); // 30 seconds
+        }, 30000);
 
-        // Clear fallback timeout when payment is handled
         const clearFallback = () => clearTimeout(fallbackTimeout);
 
-        // Attach cleanup to all handlers
         const originalSuccess = options.handler;
         options.handler = (resp) => {
           clearFallback();
           originalSuccess(resp);
         };
 
-        rzp.on("payment.failed", function (err?: RazorpayPaymentFailed) {
+        rzp.on("payment.failed", async function (err?: RazorpayPaymentFailed) {
           clearFallback();
           console.error("Razorpay failure:", err);
+          try {
+            await fetch("https://scpapi.elitceler.com/api/v1/payments/verification", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ razorpay_order_id: orderId }),
+            });
+          } catch (e) {
+            console.error("Verification call on failure errored:", e);
+          }
           setPaymentStatus("failed");
           setSubmitting(false);
           toast.error("Payment failed. Please try again.");
         });
 
-        rzp.on("modal.dismiss", () => {
-          clearFallback();
-          setPaymentStatus("failed");
-          setSubmitting(false);
-          toast.error("Payment cancelled.");
-        });
-
+        // Remove old event-based modal.dismiss; handled via options.modal.ondismiss
       } else {
         toast.error(json?.message || "Failed to create ticket");
         setSubmitting(false);
