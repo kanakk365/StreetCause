@@ -45,12 +45,9 @@ const TicketModal: React.FC<TicketModalProps> = ({ isOpen, onClose, data }) => {
 
   if (!isOpen || !data) return null;
 
-  const isVip = data.passType?.toUpperCase() === "VIP";
   const isDonation = data.passType?.toUpperCase() === "DONATION";
   const title = isDonation
     ? "Street Cause - Donation Receipt"
-    : isVip
-    ? "Navratri Nirvana(2025) - VIP Pass"
     : "Navratri Nirvana(2025) - Normal Pass";
 
   return (
@@ -61,8 +58,8 @@ const TicketModal: React.FC<TicketModalProps> = ({ isOpen, onClose, data }) => {
           <div className="w-full h-[200px] bg-[#f5f5f5] relative">
             {/* Pass image based on pass type */}
             <Image
-              src={isDonation ? "/images/pass1.png" : isVip ? "/images/pass2.png" : "/images/pass1.png"}
-              alt={isDonation ? "Donation Receipt" : isVip ? "VIP Pass" : "Normal Pass"}
+              src={isDonation ? "/images/pass1.png" : "/images/pass1.png"}
+              alt={isDonation ? "Donation Receipt" : "Normal Pass"}
               fill
               className="object-cover"
               unoptimized
