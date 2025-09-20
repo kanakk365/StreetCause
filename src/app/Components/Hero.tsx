@@ -6,15 +6,15 @@ import { DonationModal } from "./DonationModal";
 
 export const HeroSection: React.FC = () => {
   const [isDonateOpen, setIsDonateOpen] = useState(false);
-  const handleSellPass = () => {
-    const element = document.getElementById('buy-pass');
-    if (element) {
-      element.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start'
-      });
-    }
-  };
+  // const handleSellPass = () => {
+  //   const element = document.getElementById('buy-pass');
+  //   if (element) {
+  //     element.scrollIntoView({
+  //       behavior: 'smooth',
+  //       block: 'start'
+  //     });
+  //   }
+  // };
 
   const handleDonate = () => {
     setIsDonateOpen(true);
@@ -63,14 +63,14 @@ export const HeroSection: React.FC = () => {
           </p>
         </header>
         <div className="flex items-center gap-4 max-md:flex-col max-md:gap-4 max-sm:gap-3 max-sm:w-full max-sm:max-w-[90%] max-sm:flex-col">
-          <button
+          {/* <button
             onClick={handleSellPass}
             className="flex justify-center items-center font-semibold shadow-[0_1rem_4rem_0_rgba(255,255,255,0.25)] cursor-pointer px-8 py-3 rounded-[4.6875rem] max-md:w-48 max-sm:w-full max-sm:h-12 max-sm:px-6 max-sm:py-4 bg-[#FF7A00] hover:bg-[#e66a00] transition-all duration-300"
           >
             <span className="text-black text-xl leading-6 tracking-[0.03125rem] max-sm:text-base">
               Sell a pass
             </span>
-          </button>
+          </button> */}
           <button
             onClick={handleDonate}
             className="flex justify-center items-center gap-2.5 shadow-[0_1rem_4rem_0_rgba(255,255,255,0.25)] cursor-pointer px-5 py-3 rounded-[5.9375rem] max-md:w-48 max-sm:w-full max-sm:h-12 max-sm:px-6 max-sm:py-4 bg-[#800020] hover:bg-[#600018] transition-all duration-300"
